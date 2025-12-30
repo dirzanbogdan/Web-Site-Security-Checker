@@ -1,0 +1,23 @@
+:root{
+  --wssc-code-bg:#0b1020;
+  --wssc-code-fg:#e6edf3;
+}
+
+.code-block{
+  background:var(--wssc-code-bg);
+  color:var(--wssc-code-fg);
+  padding:12px;
+  border-radius:8px;
+  overflow:auto;
+  max-height:320px;
+}
+
+.captcha-box{
+  padding:10px 12px;
+  border:1px solid #dee2e6;
+  border-radius:8px;
+  background:#f8f9fa;
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  white-space:nowrap;
+}
+

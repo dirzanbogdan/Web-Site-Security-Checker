@@ -1,0 +1,14 @@
+{
+  "cms": [
+    {
+      "name": "WordPress",
+      "min_version_inclusive": "0.0.0",
+      "max_version_inclusive": "4.9.9",
+      "cve": "CVE-2019-XXXX",
+      "title": "Referință exemplu (înlocuiește cu date reale)",
+      "link": "https://cve.mitre.org/",
+      "notes": "Acesta este un exemplu. Actualizează manual baza cu intervale și CVE-uri reale."
+    }
+  ]
+}
+
