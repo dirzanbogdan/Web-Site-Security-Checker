@@ -101,7 +101,7 @@ function wssc_curl_get(string $url, int $timeoutSeconds, int $maxBytes): array
     $ok = curl_exec($ch);
     $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     $err = curl_error($ch);
-    curl_close($ch);
+    $ch = null;
 
     if ($ok === false) {
         return ['ok' => false, 'status' => $status ?: 0, 'body' => '', 'error' => $err !== '' ? $err : 'Eroare HTTP.'];
@@ -239,117 +239,93 @@ function wssc_collect_cpe_matches(array $node, array &$out): void
 function wssc_nvd_fetch_page(array $params, int $timeoutSeconds): array
 {
     $base = 'https://services.nvd.nist.gov/rest/json/cves/2.0';
-    $qs = http_build_query($params);
-    return wssc_get_json($base . '?' . $qs, $timeoutSeconds, 6_000_000);
+    $url = $base . '?' . http_build_query($params);
+
+    $attempt = 0;
+    $delayUs = 500_000;
+    while (true) {
+        $attempt++;
+
+        $resp = wssc_curl_get($url, $timeoutSeconds, 6_000_000);
+        if (!$resp['ok']) {
+            throw new RuntimeException(($resp['error'] ?? 'Eroare HTTP.') . ' (' . $url . ')');
+        }
+
+        $status = (int)($resp['status'] ?? 0);
+        if ($status === 404) {
+            throw new RuntimeException('NVD API: request invalid (de obicei intervalul pubStartDate/pubEndDate depășește 120 zile). HTTP 404 la ' . $url);
+        }
+
+        if (($status === 429 || $status === 503) && $attempt < 6) {
+            usleep($delayUs);
+            $delayUs = min(8_000_000, $delayUs * 2);
+            continue;
+        }
+
+        if ($status < 200 || $status >= 300) {
+            throw new RuntimeException('HTTP ' . $status . ' la ' . $url);
+        }
+
+        $decoded = json_decode((string)($resp['body'] ?? ''), true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('JSON invalid la ' . $url);
+        }
+        return $decoded;
+    }
+}
+
+/**
+ * @return list<array{start:string,end:string}>
+ */
+function wssc_nvd_pubdate_segments(int $lastDays): array
+{
+    $lastDays = max(1, $lastDays);
+    $maxRangeDays = 120;
+
+    $endTs = time();
+    $startTs = $endTs - ($lastDays * 86400);
+    $segments = [];
+    $cursor = $startTs;
+    while ($cursor < $endTs) {
+        $segEnd = min($cursor + ($maxRangeDays * 86400), $endTs);
+        $segments[] = [
+            'start' => gmdate('Y-m-d\TH:i:s.000\Z', $cursor),
+            'end' => gmdate('Y-m-d\TH:i:s.000\Z', $segEnd),
+        ];
+        $cursor = $segEnd;
+    }
+    return $segments;
 }
 
 function wssc_source_nvd_recent(array $settings): array
 {
     $timeout = (int)($settings['timeout_seconds'] ?? 20);
-    $lastDays = (int)($settings['nvd_last_days'] ?? 365);
+    $lastDays = (int)($settings['nvd_last_days'] ?? 120);
     $max = (int)($settings['nvd_max_results'] ?? 500);
+    $apiKey = trim((string)($settings['nvd_api_key'] ?? ''));
+    $sleepUs = $apiKey !== '' ? 250_000 : 600_000;
 
     $lastDays = max(1, min(3650, $lastDays));
     $max = max(1, min(5000, $max));
-
-    $end = gmdate('Y-m-d\TH:i:s.000\Z');
-    $start = gmdate('Y-m-d\TH:i:s.000\Z', time() - ($lastDays * 86400));
 
     $cves = [];
     $seen = [];
-    $startIndex = 0;
     $perPage = 200;
 
-    while (count($cves) < $max) {
-        $page = wssc_nvd_fetch_page([
-            'pubStartDate' => $start,
-            'pubEndDate' => $end,
-            'startIndex' => $startIndex,
-            'resultsPerPage' => $perPage,
-        ], $timeout);
-
-        $v = $page['vulnerabilities'] ?? [];
-        if (!is_array($v) || !$v) {
-            break;
-        }
-
-        foreach ($v as $item) {
-            if (!is_array($item) || !is_array($item['cve'] ?? null)) {
-                continue;
-            }
-            $c = $item['cve'];
-            $id = $c['id'] ?? null;
-            if (!is_string($id) || !preg_match('/^CVE-\d{4}-\d+$/', $id)) {
-                continue;
-            }
-            if (isset($seen[$id])) {
-                continue;
-            }
-            $seen[$id] = true;
-            $cves[] = [
-                'cve' => $id,
-                'title' => wssc_normalize_text($c['sourceIdentifier'] ?? '') !== '' ? ('NVD: ' . wssc_normalize_text($c['sourceIdentifier'] ?? '')) : '',
-                'description' => wssc_pick_en_description(is_array($c['descriptions'] ?? null) ? $c['descriptions'] : []),
-                'published' => is_string($c['published'] ?? null) ? $c['published'] : null,
-                'modified' => is_string($c['lastModified'] ?? null) ? $c['lastModified'] : null,
-                'link' => 'https://nvd.nist.gov/vuln/detail/' . $id,
-                'source' => 'nvd',
-            ];
-
-            if (count($cves) >= $max) {
-                break 2;
-            }
-        }
-
-        $startIndex += $perPage;
-        $total = (int)($page['totalResults'] ?? 0);
-        if ($total > 0 && $startIndex >= $total) {
-            break;
-        }
-        usleep(250_000);
-    }
-
-    return [
-        'cms' => [],
-        'cves' => $cves,
-        'stats' => ['cves' => count($cves), 'cms' => 0],
-    ];
-}
-
-function wssc_source_nvd_cms(array $settings): array
-{
-    $timeout = (int)($settings['timeout_seconds'] ?? 20);
-    $lastDays = (int)($settings['nvd_last_days'] ?? 365);
-    $max = (int)($settings['nvd_max_results'] ?? 800);
-
-    $lastDays = max(1, min(3650, $lastDays));
-    $max = max(1, min(5000, $max));
-
-    $end = gmdate('Y-m-d\TH:i:s.000\Z');
-    $start = gmdate('Y-m-d\TH:i:s.000\Z', time() - ($lastDays * 86400));
-
-    $keywords = [
-        ['kw' => 'wordpress', 'cms' => 'WordPress'],
-        ['kw' => 'drupal', 'cms' => 'Drupal'],
-        ['kw' => 'joomla', 'cms' => 'Joomla'],
-    ];
-
-    $cmsEntries = [];
-    $cves = [];
-    $seenCms = [];
-    $seenCves = [];
-
-    foreach ($keywords as $k) {
+    $segments = wssc_nvd_pubdate_segments($lastDays);
+    foreach ($segments as $seg) {
         $startIndex = 0;
-        $perPage = 200;
-        while ((count($cmsEntries) + count($cves)) < $max) {
-            $page = wssc_nvd_fetch_page([
-                'keywordSearch' => $k['kw'],
-                'pubStartDate' => $start,
-                'pubEndDate' => $end,
+        while (count($cves) < $max) {
+            $params = [
+                'pubStartDate' => $seg['start'],
+                'pubEndDate' => $seg['end'],
                 'startIndex' => $startIndex,
                 'resultsPerPage' => $perPage,
-            ], $timeout);
+            ];
+            if ($apiKey !== '') {
+                $params['apiKey'] = $apiKey;
+            }
+            $page = wssc_nvd_fetch_page($params, $timeout);
 
             $v = $page['vulnerabilities'] ?? [];
             if (!is_array($v) || !$v) {
@@ -365,92 +341,22 @@ function wssc_source_nvd_cms(array $settings): array
                 if (!is_string($id) || !preg_match('/^CVE-\d{4}-\d+$/', $id)) {
                     continue;
                 }
-
-                if (!isset($seenCves[$id])) {
-                    $seenCves[$id] = true;
-                    $cves[] = [
-                        'cve' => $id,
-                        'title' => '',
-                        'description' => wssc_pick_en_description(is_array($c['descriptions'] ?? null) ? $c['descriptions'] : []),
-                        'published' => is_string($c['published'] ?? null) ? $c['published'] : null,
-                        'modified' => is_string($c['lastModified'] ?? null) ? $c['lastModified'] : null,
-                        'link' => 'https://nvd.nist.gov/vuln/detail/' . $id,
-                        'source' => 'nvd',
-                    ];
-                }
-
-                $configs = $c['configurations'] ?? null;
-                if (!is_array($configs)) {
+                if (isset($seen[$id])) {
                     continue;
                 }
+                $seen[$id] = true;
+                $cves[] = [
+                    'cve' => $id,
+                    'title' => wssc_normalize_text($c['sourceIdentifier'] ?? '') !== '' ? ('NVD: ' . wssc_normalize_text($c['sourceIdentifier'] ?? '')) : '',
+                    'description' => wssc_pick_en_description(is_array($c['descriptions'] ?? null) ? $c['descriptions'] : []),
+                    'published' => is_string($c['published'] ?? null) ? $c['published'] : null,
+                    'modified' => is_string($c['lastModified'] ?? null) ? $c['lastModified'] : null,
+                    'link' => 'https://nvd.nist.gov/vuln/detail/' . $id,
+                    'source' => 'nvd',
+                ];
 
-                $matches = [];
-                foreach ($configs as $cfg) {
-                    if (!is_array($cfg)) {
-                        continue;
-                    }
-                    foreach (($cfg['nodes'] ?? []) as $node) {
-                        if (is_array($node)) {
-                            wssc_collect_cpe_matches($node, $matches);
-                        }
-                    }
-                }
-
-                foreach ($matches as $m) {
-                    $criteria = (string)($m['criteria'] ?? '');
-                    $parsed = wssc_cpe_to_vendor_product_version($criteria);
-                    $vendor = $parsed['vendor'];
-                    $product = $parsed['product'];
-                    if (!is_string($vendor) || !is_string($product)) {
-                        continue;
-                    }
-                    $cms = wssc_cms_from_cpe($vendor, $product);
-                    if ($cms === null) {
-                        continue;
-                    }
-
-                    $ver = $parsed['version'];
-                    $minInc = null;
-                    $minExc = null;
-                    $maxInc = null;
-                    $maxExc = null;
-
-                    if (is_string($ver) && $ver !== '' && $ver !== '*' && $ver !== '-') {
-                        $minInc = $ver;
-                        $maxInc = $ver;
-                    } else {
-                        if (is_string($m['versionStartIncluding'] ?? null)) $minInc = (string)$m['versionStartIncluding'];
-                        if (is_string($m['versionStartExcluding'] ?? null)) $minExc = (string)$m['versionStartExcluding'];
-                        if (is_string($m['versionEndIncluding'] ?? null)) $maxInc = (string)$m['versionEndIncluding'];
-                        if (is_string($m['versionEndExcluding'] ?? null)) $maxExc = (string)$m['versionEndExcluding'];
-                    }
-
-                    if ($minInc === null && $minExc === null && $maxInc === null && $maxExc === null) {
-                        continue;
-                    }
-
-                    $key = $cms . '|' . $id . '|' . (string)$minInc . '|' . (string)$minExc . '|' . (string)$maxInc . '|' . (string)$maxExc;
-                    if (isset($seenCms[$key])) {
-                        continue;
-                    }
-                    $seenCms[$key] = true;
-
-                    $cmsEntries[] = [
-                        'name' => $cms,
-                        'min_version_inclusive' => $minInc,
-                        'min_version_exclusive' => $minExc,
-                        'max_version_inclusive' => $maxInc,
-                        'max_version_exclusive' => $maxExc,
-                        'cve' => $id,
-                        'title' => wssc_normalize_text($c['sourceIdentifier'] ?? '') !== '' ? ('NVD: ' . wssc_normalize_text($c['sourceIdentifier'] ?? '')) : 'NVD CVE',
-                        'link' => 'https://nvd.nist.gov/vuln/detail/' . $id,
-                        'notes' => '',
-                        'source' => 'nvd',
-                    ];
-
-                    if ((count($cmsEntries) + count($cves)) >= $max) {
-                        break 3;
-                    }
+                if (count($cves) >= $max) {
+                    break 2;
                 }
             }
 
@@ -459,7 +365,167 @@ function wssc_source_nvd_cms(array $settings): array
             if ($total > 0 && $startIndex >= $total) {
                 break;
             }
-            usleep(250_000);
+            usleep($sleepUs);
+        }
+    }
+
+    return [
+        'cms' => [],
+        'cves' => $cves,
+        'stats' => ['cves' => count($cves), 'cms' => 0],
+    ];
+}
+
+function wssc_source_nvd_cms(array $settings): array
+{
+    $timeout = (int)($settings['timeout_seconds'] ?? 20);
+    $lastDays = (int)($settings['nvd_last_days'] ?? 120);
+    $max = (int)($settings['nvd_max_results'] ?? 800);
+    $apiKey = trim((string)($settings['nvd_api_key'] ?? ''));
+    $sleepUs = $apiKey !== '' ? 250_000 : 600_000;
+
+    $lastDays = max(1, min(3650, $lastDays));
+    $max = max(1, min(5000, $max));
+
+    $keywords = [
+        ['kw' => 'wordpress', 'cms' => 'WordPress'],
+        ['kw' => 'drupal', 'cms' => 'Drupal'],
+        ['kw' => 'joomla', 'cms' => 'Joomla'],
+    ];
+
+    $cmsEntries = [];
+    $cves = [];
+    $seenCms = [];
+    $seenCves = [];
+
+    foreach ($keywords as $k) {
+        $perPage = 200;
+        $segments = wssc_nvd_pubdate_segments($lastDays);
+        foreach ($segments as $seg) {
+            $startIndex = 0;
+            while ((count($cmsEntries) + count($cves)) < $max) {
+                $params = [
+                    'keywordSearch' => $k['kw'],
+                    'pubStartDate' => $seg['start'],
+                    'pubEndDate' => $seg['end'],
+                    'startIndex' => $startIndex,
+                    'resultsPerPage' => $perPage,
+                ];
+                if ($apiKey !== '') {
+                    $params['apiKey'] = $apiKey;
+                }
+                $page = wssc_nvd_fetch_page($params, $timeout);
+
+                $v = $page['vulnerabilities'] ?? [];
+                if (!is_array($v) || !$v) {
+                    break;
+                }
+
+                foreach ($v as $item) {
+                    if (!is_array($item) || !is_array($item['cve'] ?? null)) {
+                        continue;
+                    }
+                    $c = $item['cve'];
+                    $id = $c['id'] ?? null;
+                    if (!is_string($id) || !preg_match('/^CVE-\d{4}-\d+$/', $id)) {
+                        continue;
+                    }
+
+                    if (!isset($seenCves[$id])) {
+                        $seenCves[$id] = true;
+                        $cves[] = [
+                            'cve' => $id,
+                            'title' => '',
+                            'description' => wssc_pick_en_description(is_array($c['descriptions'] ?? null) ? $c['descriptions'] : []),
+                            'published' => is_string($c['published'] ?? null) ? $c['published'] : null,
+                            'modified' => is_string($c['lastModified'] ?? null) ? $c['lastModified'] : null,
+                            'link' => 'https://nvd.nist.gov/vuln/detail/' . $id,
+                            'source' => 'nvd',
+                        ];
+                    }
+
+                    $configs = $c['configurations'] ?? null;
+                    if (!is_array($configs)) {
+                        continue;
+                    }
+
+                    $matches = [];
+                    foreach ($configs as $cfg) {
+                        if (!is_array($cfg)) {
+                            continue;
+                        }
+                        foreach (($cfg['nodes'] ?? []) as $node) {
+                            if (is_array($node)) {
+                                wssc_collect_cpe_matches($node, $matches);
+                            }
+                        }
+                    }
+
+                    foreach ($matches as $m) {
+                        $criteria = (string)($m['criteria'] ?? '');
+                        $parsed = wssc_cpe_to_vendor_product_version($criteria);
+                        $vendor = $parsed['vendor'];
+                        $product = $parsed['product'];
+                        if (!is_string($vendor) || !is_string($product)) {
+                            continue;
+                        }
+                        $cms = wssc_cms_from_cpe($vendor, $product);
+                        if ($cms === null) {
+                            continue;
+                        }
+
+                        $ver = $parsed['version'];
+                        $minInc = null;
+                        $minExc = null;
+                        $maxInc = null;
+                        $maxExc = null;
+
+                        if (is_string($ver) && $ver !== '' && $ver !== '*' && $ver !== '-') {
+                            $minInc = $ver;
+                            $maxInc = $ver;
+                        } else {
+                            if (is_string($m['versionStartIncluding'] ?? null)) $minInc = (string)$m['versionStartIncluding'];
+                            if (is_string($m['versionStartExcluding'] ?? null)) $minExc = (string)$m['versionStartExcluding'];
+                            if (is_string($m['versionEndIncluding'] ?? null)) $maxInc = (string)$m['versionEndIncluding'];
+                            if (is_string($m['versionEndExcluding'] ?? null)) $maxExc = (string)$m['versionEndExcluding'];
+                        }
+
+                        if ($minInc === null && $minExc === null && $maxInc === null && $maxExc === null) {
+                            continue;
+                        }
+
+                        $key = $cms . '|' . $id . '|' . (string)$minInc . '|' . (string)$minExc . '|' . (string)$maxInc . '|' . (string)$maxExc;
+                        if (isset($seenCms[$key])) {
+                            continue;
+                        }
+                        $seenCms[$key] = true;
+
+                        $cmsEntries[] = [
+                            'name' => $cms,
+                            'min_version_inclusive' => $minInc,
+                            'min_version_exclusive' => $minExc,
+                            'max_version_inclusive' => $maxInc,
+                            'max_version_exclusive' => $maxExc,
+                            'cve' => $id,
+                            'title' => wssc_normalize_text($c['sourceIdentifier'] ?? '') !== '' ? ('NVD: ' . wssc_normalize_text($c['sourceIdentifier'] ?? '')) : 'NVD CVE',
+                            'link' => 'https://nvd.nist.gov/vuln/detail/' . $id,
+                            'notes' => '',
+                            'source' => 'nvd',
+                        ];
+
+                        if ((count($cmsEntries) + count($cves)) >= $max) {
+                            break 4;
+                        }
+                    }
+                }
+
+                $startIndex += $perPage;
+                $total = (int)($page['totalResults'] ?? 0);
+                if ($total > 0 && $startIndex >= $total) {
+                    break;
+                }
+                usleep($sleepUs);
+            }
         }
     }
 
@@ -628,6 +694,7 @@ $enabled = is_array($enabled) ? array_values(array_filter($enabled, 'is_string')
 $timeoutSeconds = (int)($settings['timeout_seconds'] ?? 20);
 $nvdLastDays = (int)($settings['nvd_last_days'] ?? 365);
 $nvdMaxResults = (int)($settings['nvd_max_results'] ?? 800);
+$nvdApiKey = is_string($settings['nvd_api_key'] ?? null) ? trim((string)$settings['nvd_api_key']) : '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
@@ -675,11 +742,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nvdMaxResults = (int)($_POST['nvd_max_results'] ?? $nvdMaxResults);
         $nvdMaxResults = max(1, min(5000, $nvdMaxResults));
 
+        $nvdApiKey = trim((string)($_POST['nvd_api_key'] ?? $nvdApiKey));
+        if (strlen($nvdApiKey) > 200) {
+            $nvdApiKey = substr($nvdApiKey, 0, 200);
+        }
+
         $settings = [
             'enabled_sources' => $newEnabled,
             'timeout_seconds' => $timeoutSeconds,
             'nvd_last_days' => $nvdLastDays,
             'nvd_max_results' => $nvdMaxResults,
+            'nvd_api_key' => $nvdApiKey,
         ];
 
         if ($action === 'save') {
@@ -866,6 +939,10 @@ $cvesCount = is_array($db['cves'] ?? null) ? count($db['cves']) : 0;
             <div class="col-md-4">
               <label class="form-label small text-muted">NVD: max rezultate</label>
               <input class="form-control" type="number" min="1" max="5000" name="nvd_max_results" value="<?= Html::e((string)$nvdMaxResults) ?>">
+            </div>
+            <div class="col-12">
+              <label class="form-label small text-muted">NVD API key (opțional)</label>
+              <input class="form-control" name="nvd_api_key" value="<?= Html::e((string)$nvdApiKey) ?>" autocomplete="off">
             </div>
             <div class="col-12 text-muted small">
               NVD are rate-limit. Dacă primești erori, micșorează numărul de rezultate sau intervalul de zile.
