@@ -82,6 +82,13 @@ function db(): PDO
         return $pdo;
     }
 
+    if (!class_exists(PDO::class)) {
+        throw new RuntimeException('Extensia PHP "PDO" lipsește. Activează "pdo" și "pdo_mysql" în cPanel (Select PHP Version) sau contactează hosting-ul.');
+    }
+    if (!extension_loaded('pdo_mysql')) {
+        throw new RuntimeException('Extensia PHP "pdo_mysql" lipsește. Activează driverul MySQL pentru PDO în cPanel (Select PHP Version) sau contactează hosting-ul.');
+    }
+
     $cfg = app_config();
     $pdo = Db::connect($cfg['db']);
     return $pdo;
@@ -109,4 +116,3 @@ function captcha(): Captcha
     $c = new Captcha($cfg['security']['captcha']);
     return $c;
 }
-

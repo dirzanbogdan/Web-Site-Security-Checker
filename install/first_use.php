@@ -280,10 +280,13 @@ try {
 }
 
 $checks = [
-    'PHP >= 8.4' => version_compare(PHP_VERSION, '8.4.0', '>='),
+    'PHP >= 8.1' => version_compare(PHP_VERSION, '8.1.0', '>='),
     'Extensii: mysqli' => extension_loaded('mysqli'),
+    'Extensii: PDO' => extension_loaded('pdo'),
+    'Extensii: pdo_mysql' => extension_loaded('pdo_mysql'),
     'Extensii: curl' => extension_loaded('curl'),
     'Extensii: openssl' => extension_loaded('openssl'),
+    'Extensii: zip (backup)' => extension_loaded('zip'),
 ];
 
 ?>
