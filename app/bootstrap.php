@@ -180,39 +180,61 @@ function exec_available(): bool
 function app_version_label(): string
 {
     $cfg = app_config();
-    $ver = is_string($cfg['app']['version'] ?? null) ? (string)$cfg['app']['version'] : '';
+    $verRaw = is_string($cfg['app']['version'] ?? null) ? (string)$cfg['app']['version'] : '';
     $commit = app_commit_short();
+    $maj = '1';
+    $min = '0';
+    $date = gmdate('Ymd');
+    $parts = explode('.', $verRaw);
+    if (count($parts) >= 3) {
+        $maj = preg_replace('/[^0-9]/', '', (string)$parts[0]) ?: $maj;
+        $min = preg_replace('/[^0-9]/', '', (string)$parts[1]) ?: $min;
+        $date = preg_replace('/[^0-9]/', '', (string)$parts[2]) ?: $date;
+    }
     if (exec_available()) {
-        $out = shell_exec('git describe --tags --always --dirty 2>&1');
-        if (is_string($out) && trim($out) !== '') {
-            $ver = trim($out);
+        $ds = shell_exec('git log -1 --date=format:%Y%m%d --format=%cd 2>&1');
+        if (is_string($ds) && trim($ds) !== '') {
+            $date = trim($ds);
         }
     }
-    $label = $ver !== '' ? $ver : '';
-    if ($label !== '' && is_string($commit) && $commit !== '') {
+    $label = $maj . '.' . $min . '.' . $date;
+    if (is_string($commit) && $commit !== '') {
         $label .= ' (' . $commit . ')';
-    } elseif ($label === '' && is_string($commit) && $commit !== '') {
-        $label = '(' . $commit . ')';
     }
-    return $label !== '' ? $label : '-';
+    return $label;
 }
 
 function navbar_html(array $config): string
 {
     $appName = (string)($config['app']['name'] ?? 'WSSC');
     $short = (string)($config['app']['short_name'] ?? 'WSSC');
+    $baseUrl = (string)($config['app']['base_url'] ?? '');
+    $script = (string)($_SERVER['SCRIPT_NAME'] ?? '');
+    $inAdmin = str_contains($script, '/admin/');
+    $pref = $baseUrl !== '' ? rtrim($baseUrl, '/') . '/' : ($inAdmin ? '../' : '');
+    $logoutUrl = ($baseUrl !== '' ? rtrim($baseUrl, '/') . '/index.php' : ($inAdmin ? '../index.php' : 'index.php')) . '?action=logout';
+    $remaining = 0;
+    if (isset($_SESSION['wssc_last_seen']) && is_int($_SESSION['wssc_last_seen'])) {
+        $remaining = max(0, 300 - (time() - (int)$_SESSION['wssc_last_seen']));
+    }
     $html = '';
     $html .= '<nav class="navbar navbar-expand-lg navbar-dark bg-dark">';
     $html .= '<div class="container">';
-    $html .= '<a class="navbar-brand" href="index.php">' . \WSSC\Util\Html::e($short !== '' ? $short : $appName) . '</a>';
+    $html .= '<a class="navbar-brand" href="' . \WSSC\Util\Html::e($pref . 'index.php') . '">' . \WSSC\Util\Html::e($short !== '' ? $short : $appName) . '</a>';
     $html .= '<div class="navbar-nav">';
-    $html .= '<a class="nav-link" href="index.php">Dashboard</a>';
-    $html .= '<a class="nav-link" href="index.php?page=history">Istoric</a>';
-    $html .= '<a class="nav-link" href="index.php?page=compare">Comparare</a>';
-    $html .= '<a class="nav-link" href="admin/update.php">Update</a>';
-    $html .= '<a class="nav-link" href="admin/vuln_sources.php">Surse CVE</a>';
+    $html .= '<a class="nav-link" href="' . \WSSC\Util\Html::e($pref . 'index.php') . '">Dashboard</a>';
+    $html .= '<a class="nav-link" href="' . \WSSC\Util\Html::e($pref . 'index.php?page=history') . '">Istoric</a>';
+    $html .= '<a class="nav-link" href="' . \WSSC\Util\Html::e($pref . 'index.php?page=compare') . '">Comparare</a>';
+    $html .= '<a class="nav-link" href="' . \WSSC\Util\Html::e($pref . 'admin/update.php') . '">Update</a>';
+    $html .= '<a class="nav-link" href="' . \WSSC\Util\Html::e($pref . 'admin/vuln_sources.php') . '">Surse CVE</a>';
+    $html .= '</div>';
+    $html .= '<div class="ms-auto d-flex align-items-center gap-3">';
+    $html .= '<span class="badge bg-secondary">Auto logout in <span id="logoutTimer">' . \WSSC\Util\Html::e((string)$remaining) . '</span>s</span>';
+    $html .= '<a class="btn btn-outline-light btn-sm" href="' . \WSSC\Util\Html::e($logoutUrl) . '">Logout</a>';
     $html .= '</div>';
     $html .= '</div></nav>';
+    $js = '<script>(function(){var r=' . (int)$remaining . ';var u=' . json_encode((string)$logoutUrl) . ';function f(n){var m=Math.floor(n/60),s=("0"+(n%60)).slice(-2);return m+":"+s;}var el=document.getElementById("logoutTimer");function t(){if(!el)return;el.textContent=f(r);r--;if(r<0){location.href=u;}else{setTimeout(t,1000);}}t();})();</script>';
+    $html .= $js;
     return $html;
 }
 

@@ -40,6 +40,7 @@ final class Auth
         $_SESSION[self::SESSION_ID] = (int)$user['id'];
         $_SESSION[self::SESSION_ROLE] = (string)$user['role'];
         $_SESSION[self::SESSION_NAME] = (string)$user['username'];
+        $_SESSION['wssc_last_seen'] = time();
 
         $this->users->updateLastLogin((int)$user['id']);
     }
@@ -53,7 +54,16 @@ final class Auth
 
     public function isAuthenticated(): bool
     {
-        return isset($_SESSION[self::SESSION_ID]) && (int)$_SESSION[self::SESSION_ID] > 0;
+        if (!isset($_SESSION[self::SESSION_ID]) || (int)$_SESSION[self::SESSION_ID] <= 0) {
+            return false;
+        }
+        $last = isset($_SESSION['wssc_last_seen']) && is_int($_SESSION['wssc_last_seen']) ? (int)$_SESSION['wssc_last_seen'] : time();
+        if ((time() - $last) > 300) {
+            $this->logout();
+            return false;
+        }
+        $_SESSION['wssc_last_seen'] = time();
+        return true;
     }
 
     public function requireAuthenticated(): void
@@ -83,4 +93,3 @@ final class Auth
         }
     }
 }
-

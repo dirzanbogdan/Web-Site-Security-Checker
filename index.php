@@ -65,6 +65,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
+if (isset($_GET['action']) && (string)$_GET['action'] === 'logout') {
+    $auth->logout();
+    header('Location: index.php');
+    exit;
+}
+
 if (!$auth->isAuthenticated()) {
     $token = $csrf->getToken();
     $body = '<div class="row g-4"><div class="col-lg-6">';
