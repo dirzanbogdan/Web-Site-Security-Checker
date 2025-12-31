@@ -246,7 +246,7 @@ function navbar_html(array $config): string
     $html .= '<a class="btn btn-outline-light btn-sm" href="' . \WSSC\Util\Html::e($logoutUrl) . '">Logout</a>';
     $html .= '</div>';
     $html .= '</div></nav>';
-    $js = '<script>(function(){var r=' . (int)$remaining . ';var u=' . json_encode((string)$logoutUrl) . ';function f(n){var m=Math.floor(n/60),s=("0"+(n%60)).slice(-2);return m+":"+s;}var el=document.getElementById("logoutTimer");function t(){if(!el)return;el.textContent=f(r);r--;if(r<0){location.href=u;}else{setTimeout(t,1000);}}t();})();</script>';
+    $js = '<script>(function(){var r=' . (int)$remaining . ';var u=' . json_encode((string)$logoutUrl) . ';function f(n){var m=Math.floor(n/60),s=("0"+(n%60)).slice(-2);return m+":"+s;}var el=document.getElementById("logoutTimer");var h=setInterval(function(){if(!el){clearInterval(h);return;}if(r<=0){clearInterval(h);try{window.location.replace(u);}catch(e){window.location.href=u;}return;}el.textContent=f(r);r--;},1000);})();</script>';
     $html .= $js;
     return $html;
 }
