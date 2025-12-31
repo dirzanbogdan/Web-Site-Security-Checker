@@ -270,6 +270,8 @@ $info = [
     'commit' => null,
     'version' => is_string($config['app']['version'] ?? null) ? (string)$config['app']['version'] : null,
     'remote_main' => null,
+    'update_available' => false,
+    'behind_commits' => 0,
 ];
 
 if (wssc_exec_available()) {
@@ -280,6 +282,16 @@ if (wssc_exec_available()) {
         $info['version'] = $gitVersion;
     }
     $info['remote_main'] = trim((string)(wssc_run_cmd('git remote -v', $root)['out'] ?? ''));
+    wssc_run_cmd('git fetch --all --prune', $root);
+    $status = (string)(wssc_run_cmd('git status -uno', $root)['out'] ?? '');
+    if ($status !== '') {
+        if (preg_match('/behind(?:.*)? by (\d+) commit/i', $status, $m)) {
+            $info['behind_commits'] = (int)$m[1];
+            if ($info['behind_commits'] > 0) {
+                $info['update_available'] = true;
+            }
+        }
+    }
 }
 
 $serverBackupDir = $root . DIRECTORY_SEPARATOR . 'backups';
@@ -371,14 +383,20 @@ $last = wssc_last_backup($serverBackupDir);
 
       <div class="row g-3">
         <div class="col-lg-6">
-          <div class="card h-100">
-            <div class="card-header">Git</div>
-            <div class="card-body">
-              <div class="row g-2">
-                <div class="col-6">
-                  <div class="text-muted small">Versiune</div>
-                  <div><?= Html::e($info['version'] ?: '-') ?></div>
+            <div class="card h-100">
+              <div class="card-header">Git</div>
+              <div class="card-body">
+              <?php if ($info['update_available']): ?>
+                <div class="alert alert-warning">
+                  <div class="fw-semibold mb-1">Exista o noua versiune! Va rog faceti update!</div>
+                  <div class="small text-muted">Branch <?= Html::e($info['branch'] ?: '-') ?> este in urma cu <?= Html::e((string)$info['behind_commits']) ?> commit-uri fata de origin.</div>
                 </div>
+              <?php endif; ?>
+                <div class="row g-2">
+                  <div class="col-6">
+                    <div class="text-muted small">Versiune</div>
+                    <div><?= Html::e($info['version'] ?: '-') ?></div>
+                  </div>
                 <div class="col-6">
                   <div class="text-muted small">Branch curent</div>
                   <div><?= Html::e($info['branch'] ?: '-') ?></div>

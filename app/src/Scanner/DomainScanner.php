@@ -123,14 +123,17 @@ final class DomainScanner
                 $result['ports'] = $portMap;
                 foreach ($portMap as $p => $st) {
                     if ($st === 'OPEN') {
+                        $svc = $this->portService((int)$p);
+                        $risk = $this->portRisk((int)$p);
+                        $best = $this->bestPracticesLink('ports');
                         $result['findings'][] = $this->finding(
                             id: 'port.open.' . $p,
                             category: 'Porturi',
                             severity: in_array((int)$p, [22, 21, 3306], true) ? 'MEDIUM' : 'LOW',
-                            title: 'Port deschis: ' . $p,
-                            description: 'Portul ' . $p . ' răspunde la conexiune TCP (OPEN).',
+                            title: 'Port deschis: ' . $p . ($svc !== '' ? (' (' . $svc . ')') : ''),
+                            description: 'Portul ' . $p . ' răspunde la conexiune TCP (OPEN). ' . ($risk !== '' ? $risk : ''),
                             recommendation: 'Restricționează expunerea la internet: firewall, allowlist, VPN sau dezactivare serviciu neutilizat.',
-                            evidence: ['port' => (int)$p, 'status' => $st]
+                            evidence: ['port' => (int)$p, 'service' => $svc !== '' ? $svc : null, 'status' => $st, 'risk' => $risk !== '' ? $risk : null, 'best_practices' => $best]
                         );
                     }
                 }
@@ -142,14 +145,17 @@ final class DomainScanner
                 $result['ports'] = $portMap;
                 foreach ($portMap as $p => $st) {
                     if ($st === 'OPEN') {
+                        $svc = $this->portService((int)$p);
+                        $risk = $this->portRisk((int)$p);
+                        $best = $this->bestPracticesLink('ports');
                         $result['findings'][] = $this->finding(
                             id: 'port.open.' . $p,
                             category: 'Porturi',
                             severity: in_array((int)$p, [22, 21, 3306], true) ? 'MEDIUM' : 'LOW',
-                            title: 'Port deschis: ' . $p,
-                            description: 'Portul ' . $p . ' răspunde la conexiune TCP (OPEN).',
+                            title: 'Port deschis: ' . $p . ($svc !== '' ? (' (' . $svc . ')') : ''),
+                            description: 'Portul ' . $p . ' răspunde la conexiune TCP (OPEN). ' . ($risk !== '' ? $risk : ''),
                             recommendation: 'Restricționează expunerea la internet dacă serviciul nu trebuie public.',
-                            evidence: ['port' => (int)$p, 'status' => $st]
+                            evidence: ['port' => (int)$p, 'service' => $svc !== '' ? $svc : null, 'status' => $st, 'risk' => $risk !== '' ? $risk : null, 'best_practices' => $best]
                         );
                     }
                 }
@@ -195,6 +201,12 @@ final class DomainScanner
                 $exp = $this->vulnScanner->checkExposures($host, $ip, $this->http, $timeout);
                 $result['exposures'] = $exp['summary'];
                 foreach ($exp['findings'] as $f) {
+                    $e = $f['evidence'] ?? [];
+                    if (is_array($e)) {
+                        $e['risk'] = $this->exposureRisk((string)$f['id']);
+                        $e['best_practices'] = $this->bestPracticesLink('exposures');
+                        $f['evidence'] = $e;
+                    }
                     $result['findings'][] = $f;
                 }
                 break;
@@ -367,5 +379,75 @@ final class DomainScanner
             'recommendation' => $recommendation,
             'evidence' => $evidence,
         ];
+    }
+
+    private function recommendationForExposure(string $id): string
+    {
+        return match ($id) {
+            'exposure.robots' => 'Verifică dacă robots.txt nu expune zone sensibile. Nu include URL-uri interne sau directoare critice.',
+            'exposure.env' => 'Blochează accesul public la .env și mută secretele în afara webroot-ului. Verifică și istoricul de commit-uri.',
+            'exposure.git' => 'Dezactivează accesul la .git și verifică dacă repository-ul nu a fost expus. Regenerarea secretelor este recomandată.',
+            'exposure.phpinfo' => 'Șterge fișierul phpinfo.php din producție; acesta expune setări și extensii.',
+            default => 'Restricționează accesul (auth, allowlist, IP restrictions) sau mută resursa în afara webroot-ului.',
+        };
+    }
+
+    private function portService(int $port): string
+    {
+        return match ($port) {
+            21 => 'FTP',
+            22 => 'SSH',
+            25 => 'SMTP',
+            53 => 'DNS',
+            80 => 'HTTP',
+            110 => 'POP3',
+            143 => 'IMAP',
+            443 => 'HTTPS',
+            465 => 'SMTPS',
+            587 => 'Submission',
+            993 => 'IMAPS',
+            995 => 'POP3S',
+            3306 => 'MySQL',
+            8080 => 'HTTP-alt',
+            default => ''
+        };
+    }
+
+    private function portRisk(int $port): string
+    {
+        return match ($port) {
+            21 => 'FTP transmite în clar; risc de interceptare și bruteforce.',
+            22 => 'SSH expus poate permite atacuri de bruteforce; hardenează și limitează.',
+            25 => 'SMTP deschis public poate fi folosit pentru relay; configurează corect.',
+            53 => 'DNS expus poate permite zone transfer dacă greșit configurat.',
+            80 => 'HTTP fără TLS expune traficul; preferă HTTPS.',
+            110, 143 => 'Protocoale mail fără TLS; preferă variante securizate.',
+            443 => 'HTTPS necesită configurare corectă TLS; verifică protocoalele.',
+            3306 => 'MySQL nu trebuie expus public; riscuri critice de compromitere.',
+            8080 => 'Server alternativ HTTP; validează dacă trebuie expus.',
+            default => ''
+        };
+    }
+
+    private function exposureRisk(string $id): string
+    {
+        return match ($id) {
+            'exposure.env' => 'Fișierul .env expune secrete/credențiale; risc major de compromitere.',
+            'exposure.git' => 'Acces la .git poate expune cod/secrete; risc sever.',
+            'exposure.phpinfo' => 'phpinfo.php expune configurații; utile pentru atacatori.',
+            'exposure.robots' => 'Robots.txt poate dezvălui structura site-ului și zone ascunse.',
+            'exposure.admin', 'exposure.wp_admin', 'exposure.joomla_admin' => 'Panouri admin expuse cresc suprafața de atac; protejează cu IP allowlist și MFA.',
+            'exposure.dir_listing' => 'Directory listing expune fișiere; poate duce la leak de configurații.',
+            default => 'Resursa expusă poate fi folosită pentru reconnaissance sau acces neautorizat.'
+        };
+    }
+
+    private function bestPracticesLink(string $topic): string
+    {
+        return match ($topic) {
+            'ports' => 'https://www.cisa.gov/sites/default/files/2023-03/secure-cloud-business-applications-best-practices.pdf',
+            'exposures' => 'https://cheatsheetseries.owasp.org/cheatsheets/Web_Application_Security_Testing_Cheat_Sheet.html',
+            default => 'https://owasp.org/www-project-top-ten/'
+        };
     }
 }

@@ -238,15 +238,51 @@ if ($page === 'scan') {
                 $vt = isset($cert['valid_to']) ? (int)$cert['valid_to'] : 0;
                 $validTo = $vt > 0 ? gmdate('Y-m-d H:i:s', $vt) . ' UTC' : '-';
                 $body .= '<div class="col-md-6"><div class="text-muted small">Expirare certificat</div><div>' . Html::e($validTo) . '</div></div>';
+                $issuerArr = isset($cert['issuer']) && is_array($cert['issuer']) ? $cert['issuer'] : null;
+                $issuerStr = '-';
+                if (is_array($issuerArr)) {
+                    $cn = '';
+                    foreach (['CN', 'cn', 'commonName'] as $k) {
+                        if (is_string($issuerArr[$k] ?? null) && $issuerArr[$k] !== '') {
+                            $cn = (string)$issuerArr[$k];
+                            break;
+                        }
+                    }
+                    $org = '';
+                    foreach (['O', 'o', 'organizationName'] as $k) {
+                        if (is_string($issuerArr[$k] ?? null) && $issuerArr[$k] !== '') {
+                            $org = (string)$issuerArr[$k];
+                            break;
+                        }
+                    }
+                    if ($cn !== '' && $org !== '') {
+                        $issuerStr = $cn . ' (' . $org . ')';
+                    } elseif ($cn !== '') {
+                        $issuerStr = $cn;
+                    } elseif ($org !== '') {
+                        $issuerStr = $org;
+                    } else {
+                        $issuerStr = json_encode($issuerArr, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                    }
+                }
+                $body .= '<div class="col-md-6"><div class="text-muted small">Issuer</div><div>' . Html::e($issuerStr) . '</div></div>';
             } else {
                 $body .= '<div class="col-md-6"><div class="text-muted small">Certificat</div><div class="text-muted">-</div></div>';
+                $body .= '<div class="col-md-6"><div class="text-muted small">Issuer</div><div class="text-muted">-</div></div>';
             }
             $body .= '<div class="col-md-6"><div class="text-muted small">Protocoale (detectate)</div>';
             if (is_array($protocols)) {
                 foreach ($protocols as $k => $v) {
                     $v = (string)$v;
                     $badge = $v === 'SUPPORTED' ? 'success' : 'secondary';
-                    $body .= '<span class="badge bg-' . $badge . ' me-1 mb-1">' . Html::e((string)$k) . ': ' . Html::e($v) . '</span>';
+                    $info = '';
+                    if ($k === 'TLSv1.0') $info = 'Protocol legacy; vulnerabilități cunoscute. Dezactivează.';
+                    if ($k === 'TLSv1.1') $info = 'Protocol legacy; dezavizat. Dezactivează.';
+                    if ($k === 'TLSv1.2') $info = 'Standard acceptat; configurează ciphers moderne.';
+                    if ($k === 'TLSv1.3') $info = 'Cea mai nouă versiune TLS; preferată.';
+                    $best = 'https://cheatsheetseries.owasp.org/cheatsheets/TLS_Cipher_String_Cheat_Sheet.html';
+                    $title = $info !== '' ? ($info . ' Vezi best practices.') : 'Protocol';
+                    $body .= '<span class="badge bg-' . $badge . ' me-1 mb-1" data-bs-toggle="tooltip" title="' . Html::e($title) . '"><span class="me-1">' . Html::e((string)$k) . ':</span> ' . Html::e($v) . ' <a href="' . Html::e($best) . '" target="_blank" rel="noopener" class="text-decoration-underline text-reset">bp</a><span class="ms-1 text-muted" data-bs-toggle="tooltip" title="' . Html::e($title) . '">?</span></span>';
                 }
             } else {
                 $body .= '<span class="text-muted">-</span>';
@@ -274,27 +310,28 @@ if ($page === 'scan') {
         }
     }
 
-    if ($result && isset($result['findings']) && is_array($result['findings'])) {
-        $counts = ['HIGH' => 0, 'MEDIUM' => 0, 'LOW' => 0, 'INFO' => 0];
-        foreach ($result['findings'] as $f) {
-            $sev = (string)($f['severity'] ?? 'INFO');
-            if (!isset($counts[$sev])) {
-                $counts[$sev] = 0;
+        if ($result && isset($result['findings']) && is_array($result['findings'])) {
+        $body .= '<div class="h5 mb-2">Vulnerabilități</div>';
+            $counts = ['HIGH' => 0, 'MEDIUM' => 0, 'LOW' => 0, 'INFO' => 0];
+            foreach ($result['findings'] as $f) {
+                $sev = (string)($f['severity'] ?? 'INFO');
+                if (!isset($counts[$sev])) {
+                    $counts[$sev] = 0;
+                }
+                $counts[$sev]++;
             }
-            $counts[$sev]++;
-        }
 
-        $body .= '<div class="card mb-3"><div class="card-body">';
-        $body .= '<div class="d-flex flex-wrap gap-2">';
-        $body .= '<span class="badge bg-danger">HIGH: ' . $counts['HIGH'] . '</span>';
-        $body .= '<span class="badge bg-warning text-dark">MEDIUM: ' . $counts['MEDIUM'] . '</span>';
-        $body .= '<span class="badge bg-info text-dark">LOW: ' . $counts['LOW'] . '</span>';
-        $body .= '<span class="badge bg-secondary">INFO: ' . $counts['INFO'] . '</span>';
-        $body .= '</div>';
-        $body .= '</div></div>';
+            $body .= '<div class="card mb-3"><div class="card-body">';
+            $body .= '<div class="d-flex flex-wrap gap-2">';
+            $body .= '<span class="badge bg-danger">HIGH: ' . $counts['HIGH'] . '</span>';
+            $body .= '<span class="badge bg-warning text-dark">MEDIUM: ' . $counts['MEDIUM'] . '</span>';
+            $body .= '<span class="badge bg-info text-dark">LOW: ' . $counts['LOW'] . '</span>';
+            $body .= '<span class="badge bg-secondary">INFO: ' . $counts['INFO'] . '</span>';
+            $body .= '</div>';
+            $body .= '</div></div>';
 
-        $body .= '<div class="accordion" id="findingsAccordion">';
-        $idx = 0;
+            $body .= '<div class="accordion" id="findingsAccordion">';
+            $idx = 0;
         foreach ($result['findings'] as $f) {
             $idx++;
             $fid = 'f' . $idx;
@@ -333,6 +370,9 @@ if ($page === 'scan') {
                 $risk = is_string($evidence['risk'] ?? null) ? (string)$evidence['risk'] : '';
                 $affected = is_string($evidence['affected'] ?? null) ? (string)$evidence['affected'] : '';
                 $safe = is_string($evidence['recommended_safe'] ?? null) ? (string)$evidence['recommended_safe'] : '';
+                $portNum = isset($evidence['port']) ? (int)$evidence['port'] : 0;
+                $service = is_string($evidence['service'] ?? null) ? (string)$evidence['service'] : '';
+                $best = is_string($evidence['best_practices'] ?? null) ? (string)$evidence['best_practices'] : '';
 
                 $isHttps = static function (string $url): bool {
                     $p = parse_url($url);
@@ -350,6 +390,9 @@ if ($page === 'scan') {
                             $body .= '<li><span class="text-muted">CVE:</span> ' . Html::e($cve) . '</li>';
                         }
                     }
+                    if ($portNum > 0) {
+                        $body .= '<li><span class="text-muted">Port:</span> ' . (int)$portNum . ($service !== '' ? (' (' . Html::e($service) . ')') : '') . '</li>';
+                    }
                     if ($affected !== '') {
                         $body .= '<li><span class="text-muted">Interval afectat:</span> ' . Html::e($affected) . '</li>';
                     }
@@ -358,6 +401,9 @@ if ($page === 'scan') {
                     }
                     if ($risk !== '') {
                         $body .= '<li><span class="text-muted">Risc:</span> ' . Html::e($risk) . '</li>';
+                    }
+                    if ($best !== '' && $isHttps($best)) {
+                        $body .= '<li><span class="text-muted">Best practices:</span> <a href="' . Html::e($best) . '" target="_blank" rel="noopener">link</a></li>';
                     }
                     $body .= '</ul>';
                     $body .= '</div>';
@@ -375,6 +421,7 @@ if ($page === 'scan') {
 
     if ($config['ui']['use_bootstrap_cdn']) {
         $body .= '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>';
+        $body .= '<script>(function(){var t=document.querySelectorAll("[data-bs-toggle=tooltip]");t.forEach(function(el){new bootstrap.Tooltip(el);});})();</script>';
     }
 
     wssc_layout(wssc_page_title('Rezultate'), $body, $config);
