@@ -226,8 +226,14 @@ function navbar_html(array $config): string
     $inAdmin = str_contains($script, '/admin/');
     $pref = $baseUrl !== '' ? rtrim($baseUrl, '/') . '/' : ($inAdmin ? '../' : '');
     $logoutUrl = ($baseUrl !== '' ? rtrim($baseUrl, '/') . '/index.php' : ($inAdmin ? '../index.php' : 'index.php')) . '?action=logout';
+    $authed = false;
+    try {
+        $authed = (new \WSSC\Auth\Auth(\WSSC\db()))->isAuthenticated();
+    } catch (\Throwable $e) {
+        $authed = false;
+    }
     $remaining = 0;
-    if (isset($_SESSION['wssc_last_seen']) && is_int($_SESSION['wssc_last_seen'])) {
+    if ($authed && isset($_SESSION['wssc_last_seen']) && is_int($_SESSION['wssc_last_seen'])) {
         $remaining = max(0, 300 - (time() - (int)$_SESSION['wssc_last_seen']));
     }
     $html = '';
@@ -242,12 +248,16 @@ function navbar_html(array $config): string
     $html .= '<a class="nav-link" href="' . \WSSC\Util\Html::e($pref . 'admin/vuln_sources.php') . '">Surse CVE</a>';
     $html .= '</div>';
     $html .= '<div class="ms-auto d-flex align-items-center gap-3">';
-    $html .= '<span class="badge bg-secondary">Auto logout in <span id="logoutTimer">' . \WSSC\Util\Html::e((string)$remaining) . '</span>s</span>';
-    $html .= '<a class="btn btn-outline-light btn-sm" href="' . \WSSC\Util\Html::e($logoutUrl) . '">Logout</a>';
+    if ($authed) {
+        $html .= '<span class="badge bg-secondary">Auto logout in <span id="logoutTimer">' . \WSSC\Util\Html::e((string)$remaining) . '</span>s</span>';
+        $html .= '<a class="btn btn-outline-light btn-sm" href="' . \WSSC\Util\Html::e($logoutUrl) . '">Logout</a>';
+    }
     $html .= '</div>';
     $html .= '</div></nav>';
-    $js = '<script>(function(){var r=' . (int)$remaining . ';var u=' . json_encode((string)$logoutUrl) . ';function f(n){var m=Math.floor(n/60),s=("0"+(n%60)).slice(-2);return m+":"+s;}var el=document.getElementById("logoutTimer");var h=setInterval(function(){if(!el){clearInterval(h);return;}if(r<=0){clearInterval(h);try{window.location.replace(u);}catch(e){window.location.href=u;}return;}el.textContent=f(r);r--;},1000);})();</script>';
-    $html .= $js;
+    if ($authed) {
+        $js = '<script>(function(){var r=' . (int)$remaining . ';var u=' . json_encode((string)$logoutUrl) . ';function f(n){var m=Math.floor(n/60),s=("0"+(n%60)).slice(-2);return m+":"+s;}var el=document.getElementById("logoutTimer");var h=setInterval(function(){if(!el){clearInterval(h);return;}if(r<=0){clearInterval(h);try{window.location.replace(u);}catch(e){window.location.href=u;}return;}el.textContent=f(r);r--;},1000);})();</script>';
+        $html .= $js;
+    }
     return $html;
 }
 
