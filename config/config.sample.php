@@ -10,7 +10,7 @@ return [
     'app' => [
         'name' => 'Web Site Security Checker',
         'short_name' => 'WSSC',
-        'version' => '1.0.20251230',
+        'version' => '1.1.20251231',
         'base_url' => 'https://sec.e-bm.eu/WSSC',
     ],
     'db' => [
