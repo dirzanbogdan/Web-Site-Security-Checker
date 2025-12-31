@@ -9,6 +9,7 @@ use WSSC\Security\RateLimiter;
 use WSSC\Storage\AuditLogger;
 use WSSC\Storage\ScanRepository;
 use WSSC\Util\Html;
+use WSSC\Auth\Auth;
 
 $config = WSSC\app_config();
 $db = WSSC\db();
@@ -17,6 +18,7 @@ $audit = new AuditLogger($db);
 $repo = new ScanRepository($db);
 $csrf = new Csrf();
 $rateLimiter = new RateLimiter($db, $config['security']['rate_limit']);
+$auth = new Auth($db);
 
 function wssc_page_title(string $title): string
 {
@@ -25,18 +27,6 @@ function wssc_page_title(string $title): string
 
 function wssc_layout(string $title, string $bodyHtml, array $config): void
 {
-    $disclaimer = $config['ui']['disclaimer_text'];
-    $appName = $config['app']['name'];
-    $year = (int)date('Y');
-    $version = is_string($config['app']['version'] ?? null) ? (string)$config['app']['version'] : '';
-    $commit = WSSC\app_commit_short();
-    $verLabel = $version !== '' ? $version : '';
-    if ($verLabel !== '' && is_string($commit) && $commit !== '') {
-        $verLabel .= ' (' . $commit . ')';
-    } elseif ($verLabel === '' && is_string($commit) && $commit !== '') {
-        $verLabel = '(' . $commit . ')';
-    }
-
     echo '<!doctype html><html lang="ro"><head>';
     echo '<meta charset="utf-8">';
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
@@ -47,29 +37,55 @@ function wssc_layout(string $title, string $bodyHtml, array $config): void
     echo '<link rel="stylesheet" href="assets/css/app.css">';
     echo '</head><body>';
 
-    echo '<nav class="navbar navbar-expand-lg navbar-dark bg-dark">';
-    echo '<div class="container">';
-    echo '<a class="navbar-brand" href="index.php">' . Html::e($appName) . '</a>';
-    echo '<div class="navbar-nav">';
-    echo '<a class="nav-link" href="index.php">Dashboard</a>';
-    echo '<a class="nav-link" href="index.php?page=history">Istoric</a>';
-    echo '<a class="nav-link" href="index.php?page=compare">Comparare</a>';
-    echo '</div>';
-    echo '</div></nav>';
+    echo WSSC\navbar_html($config);
 
     echo '<main class="container my-4">' . $bodyHtml . '</main>';
 
-    echo '<footer class="container py-4 border-top">';
-    echo '<div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">';
-    echo '<div class="small text-muted">' . Html::e($appName) . ' © ' . $year . '</div>';
-    echo '<div class="small text-muted text-md-center">' . Html::e($verLabel !== '' ? $verLabel : '-') . '</div>';
-    echo '<div class="text-md-end">';
-    echo '<div class="alert alert-warning py-2 px-3 mb-0 small"><span class="fw-semibold">' . Html::e($disclaimer) . '</span></div>';
-    echo '</div>';
-    echo '</div></footer>';
+    echo WSSC\footer_html($config);
 
     echo '<script src="assets/js/app.js"></script>';
     echo '</body></html>';
+}
+
+$loginErrors = [];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    try {
+        $csrf->requireValidToken($_POST['csrf_token'] ?? null);
+        $action = (string)$_POST['action'];
+        if ($action === 'login') {
+            $username = (string)($_POST['username'] ?? '');
+            $pwd = (string)($_POST['password'] ?? '');
+            $auth->login($username, $pwd);
+        }
+        if ($action === 'logout') {
+            $auth->logout();
+        }
+    } catch (Throwable $e) {
+        $loginErrors[] = $e->getMessage();
+    }
+}
+
+if (!$auth->isAuthenticated()) {
+    $token = $csrf->getToken();
+    $body = '<div class="row g-4"><div class="col-lg-6">';
+    if ($loginErrors) {
+        $body .= '<div class="alert alert-danger"><ul class="mb-0">';
+        foreach ($loginErrors as $er) {
+            $body .= '<li>' . Html::e($er) . '</li>';
+        }
+        $body .= '</ul></div>';
+    }
+    $body .= '<div class="card"><div class="card-header">Autentificare</div><div class="card-body">';
+    $body .= '<form method="post" class="row g-2">';
+    $body .= '<input type="hidden" name="csrf_token" value="' . Html::e($token) . '">';
+    $body .= '<input type="hidden" name="action" value="login">';
+    $body .= '<div class="col-md-4"><input class="form-control" name="username" placeholder="Username" required></div>';
+    $body .= '<div class="col-md-5"><input class="form-control" type="password" name="password" placeholder="Parolă" required></div>';
+    $body .= '<div class="col-md-3"><button class="btn btn-primary w-100" type="submit">Login</button></div>';
+    $body .= '</form></div></div>';
+    $body .= '</div></div>';
+    wssc_layout(wssc_page_title('Autentificare'), $body, $config);
+    exit;
 }
 
 $page = (string)($_GET['page'] ?? '');

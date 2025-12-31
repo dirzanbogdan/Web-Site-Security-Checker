@@ -307,16 +307,7 @@ $last = wssc_last_backup($serverBackupDir);
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
-  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <div class="container">
-      <a class="navbar-brand" href="<?= Html::e($baseUrl !== '' ? $baseUrl : '../index.php') ?>"><?= Html::e((string)$config['app']['short_name']) ?></a>
-      <div class="navbar-nav">
-        <a class="nav-link" href="<?= Html::e($baseUrl !== '' ? $baseUrl : '../index.php') ?>">Dashboard</a>
-        <a class="nav-link active" href="#">Update</a>
-        <a class="nav-link" href="vuln_sources.php">Surse CVE</a>
-      </div>
-    </div>
-  </nav>
+  <?= WSSC\navbar_html($config) ?>
 
   <main class="container my-4">
     <div class="d-flex align-items-center justify-content-between mb-3">
@@ -488,5 +479,6 @@ $last = wssc_last_backup($serverBackupDir);
       </div>
     <?php endif; ?>
   </main>
+  <?= WSSC\footer_html($config) ?>
 </body>
 </html>

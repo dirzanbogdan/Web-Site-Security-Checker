@@ -166,3 +166,70 @@ function app_commit_short(): ?string
     }
     return substr(strtolower($hash), 0, 7);
 }
+
+function exec_available(): bool
+{
+    if (!function_exists('shell_exec')) {
+        return false;
+    }
+    $disabled = (string)ini_get('disable_functions');
+    $disabledList = array_filter(array_map('trim', explode(',', $disabled)));
+    return !in_array('shell_exec', $disabledList, true);
+}
+
+function app_version_label(): string
+{
+    $cfg = app_config();
+    $ver = is_string($cfg['app']['version'] ?? null) ? (string)$cfg['app']['version'] : '';
+    $commit = app_commit_short();
+    if (exec_available()) {
+        $out = shell_exec('git describe --tags --always --dirty 2>&1');
+        if (is_string($out) && trim($out) !== '') {
+            $ver = trim($out);
+        }
+    }
+    $label = $ver !== '' ? $ver : '';
+    if ($label !== '' && is_string($commit) && $commit !== '') {
+        $label .= ' (' . $commit . ')';
+    } elseif ($label === '' && is_string($commit) && $commit !== '') {
+        $label = '(' . $commit . ')';
+    }
+    return $label !== '' ? $label : '-';
+}
+
+function navbar_html(array $config): string
+{
+    $appName = (string)($config['app']['name'] ?? 'WSSC');
+    $short = (string)($config['app']['short_name'] ?? 'WSSC');
+    $html = '';
+    $html .= '<nav class="navbar navbar-expand-lg navbar-dark bg-dark">';
+    $html .= '<div class="container">';
+    $html .= '<a class="navbar-brand" href="index.php">' . \WSSC\Util\Html::e($short !== '' ? $short : $appName) . '</a>';
+    $html .= '<div class="navbar-nav">';
+    $html .= '<a class="nav-link" href="index.php">Dashboard</a>';
+    $html .= '<a class="nav-link" href="index.php?page=history">Istoric</a>';
+    $html .= '<a class="nav-link" href="index.php?page=compare">Comparare</a>';
+    $html .= '<a class="nav-link" href="admin/update.php">Update</a>';
+    $html .= '<a class="nav-link" href="admin/vuln_sources.php">Surse CVE</a>';
+    $html .= '</div>';
+    $html .= '</div></nav>';
+    return $html;
+}
+
+function footer_html(array $config): string
+{
+    $disclaimer = (string)($config['ui']['disclaimer_text'] ?? '');
+    $appName = (string)($config['app']['name'] ?? 'WSSC');
+    $year = (int)date('Y');
+    $verLabel = app_version_label();
+    $html = '';
+    $html .= '<footer class="container py-4 border-top">';
+    $html .= '<div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">';
+    $html .= '<div class="small text-muted">' . \WSSC\Util\Html::e($appName) . ' © ' . $year . '</div>';
+    $html .= '<div class="small text-muted text-md-center">' . \WSSC\Util\Html::e($verLabel) . '</div>';
+    $html .= '<div class="text-md-end">';
+    $html .= '<div class="alert alert-warning py-2 px-3 mb-0 small"><span class="fw-semibold">' . \WSSC\Util\Html::e($disclaimer) . '</span></div>';
+    $html .= '</div>';
+    $html .= '</div></footer>';
+    return $html;
+}
