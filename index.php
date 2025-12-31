@@ -573,7 +573,7 @@ if ($page === 'compare') {
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['domain'])) {
     $audit->log('dashboard_submit', ['ip' => $_SERVER['REMOTE_ADDR'] ?? null]);
 
     try {
