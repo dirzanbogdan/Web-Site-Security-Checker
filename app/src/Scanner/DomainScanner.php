@@ -205,6 +205,24 @@ final class DomainScanner
                 $v = $tech['cms']['version'] ?? null;
                 $cms = $tech['cms']['name'] ?? null;
                 if (is_string($cms) && $cms !== '' && is_string($v) && $v !== '') {
+                    $cveDetails = [];
+                    $cisaKev = [];
+                    foreach (($db['cves'] ?? []) as $row) {
+                        if (!is_array($row)) {
+                            continue;
+                        }
+                        $id = $row['cve'] ?? null;
+                        if (!is_string($id) || $id === '') {
+                            continue;
+                        }
+                        if (!isset($cveDetails[$id])) {
+                            $cveDetails[$id] = $row;
+                        }
+                        if (($row['source'] ?? null) === 'cisa_kev') {
+                            $cisaKev[$id] = true;
+                        }
+                    }
+
                     foreach (($db['cms'] ?? []) as $entry) {
                         if (!is_array($entry) || ($entry['name'] ?? '') !== $cms) {
                             continue;
@@ -225,17 +243,51 @@ final class DomainScanner
                         if (is_string($maxExc) && Semver::compare($v, $maxExc) >= 0) {
                             continue;
                         }
+
+                        $cveId = is_string($entry['cve'] ?? null) ? (string)$entry['cve'] : '';
+                        $refLink = is_string($entry['link'] ?? null) ? (string)$entry['link'] : '';
+                        $details = ($cveId !== '' && isset($cveDetails[$cveId]) && is_array($cveDetails[$cveId])) ? $cveDetails[$cveId] : null;
+                        $isKev = $cveId !== '' && isset($cisaKev[$cveId]);
+
+                        $affected = [];
+                        if (is_string($minInc) && $minInc !== '') $affected[] = '>= ' . $minInc;
+                        if (is_string($minExc) && $minExc !== '') $affected[] = '> ' . $minExc;
+                        if (is_string($maxInc) && $maxInc !== '') $affected[] = '<= ' . $maxInc;
+                        if (is_string($maxExc) && $maxExc !== '') $affected[] = '< ' . $maxExc;
+                        $affectedStr = $affected ? implode(' ', $affected) : '';
+
+                        $safeStr = 'în afara intervalului afectat';
+                        if (is_string($maxExc) && $maxExc !== '') {
+                            $safeStr = '>= ' . $maxExc;
+                        } elseif (is_string($maxInc) && $maxInc !== '') {
+                            $safeStr = '> ' . $maxInc;
+                        }
+
+                        $sev = $isKev ? 'HIGH' : 'MEDIUM';
+                        $risk = $isKev
+                            ? 'CVE-ul apare și în catalogul CISA KEV (cunoscut ca fiind exploatat activ).'
+                            : 'Vulnerabilitate publică asociată; impactul exact depinde de CVE și de configurația site-ului.';
+                        $detailText = is_array($details) && is_string($details['description'] ?? null) && $details['description'] !== ''
+                            ? (string)$details['description']
+                            : '';
+
                         $result['findings'][] = $this->finding(
-                            id: 'cms.vuln.' . strtolower($cms) . '.' . ($entry['cve'] ?? 'ref'),
+                            id: 'cms.vuln.' . strtolower($cms) . '.' . ($cveId !== '' ? $cveId : 'ref'),
                             category: 'Vulnerabilități',
-                            severity: 'MEDIUM',
-                            title: 'Versiune CMS potențial vulnerabilă',
-                            description: 'Versiunea detectată (' . $cms . ' ' . $v . ') se încadrează într-un interval asociat cu vulnerabilități publice.',
-                            recommendation: 'Actualizează CMS-ul la ultima versiune stabilă și verifică buletinele de securitate oficiale.',
+                            severity: $sev,
+                            title: ($cveId !== '' ? ($cveId . ': ') : '') . $cms . ' ' . $v . ' în interval afectat',
+                            description: 'Versiunea detectată (' . $cms . ' ' . $v . ') se încadrează într-un interval asociat cu vulnerabilități publice.' . ($affectedStr !== '' ? (' Interval: ' . $affectedStr . '.') : '') . ($detailText !== '' ? ("\n\n" . $detailText) : ''),
+                            recommendation: 'Actualizează ' . $cms . ' la o versiune care nu mai este afectată (' . $safeStr . '). Verifică și buletinele de securitate oficiale / changelog-ul.',
                             evidence: [
                                 'cms' => $cms,
                                 'version' => $v,
+                                'cve' => $cveId !== '' ? $cveId : null,
+                                'cve_link' => $refLink !== '' ? $refLink : null,
+                                'risk' => $risk,
+                                'affected' => $affectedStr !== '' ? $affectedStr : null,
+                                'recommended_safe' => $safeStr,
                                 'reference' => $entry,
+                                'cve_details' => $details,
                             ]
                         );
                     }

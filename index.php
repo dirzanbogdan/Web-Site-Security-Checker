@@ -28,6 +28,14 @@ function wssc_layout(string $title, string $bodyHtml, array $config): void
     $disclaimer = $config['ui']['disclaimer_text'];
     $appName = $config['app']['name'];
     $year = (int)date('Y');
+    $version = is_string($config['app']['version'] ?? null) ? (string)$config['app']['version'] : '';
+    $commit = WSSC\app_commit_short();
+    $verLabel = $version !== '' ? $version : '';
+    if ($verLabel !== '' && is_string($commit) && $commit !== '') {
+        $verLabel .= ' (' . $commit . ')';
+    } elseif ($verLabel === '' && is_string($commit) && $commit !== '') {
+        $verLabel = '(' . $commit . ')';
+    }
 
     echo '<!doctype html><html lang="ro"><head>';
     echo '<meta charset="utf-8">';
@@ -51,12 +59,14 @@ function wssc_layout(string $title, string $bodyHtml, array $config): void
 
     echo '<main class="container my-4">' . $bodyHtml . '</main>';
 
-    echo '<footer class="container py-4 border-top small text-muted">';
-    echo '<div class="d-flex flex-column flex-md-row justify-content-between gap-2">';
-    echo '<div>' . Html::e($appName) . ' © ' . $year . '</div>';
-    echo '<div class="text-md-end">' . Html::e($disclaimer) . '</div>';
+    echo '<footer class="container py-4 border-top">';
+    echo '<div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">';
+    echo '<div class="small text-muted">' . Html::e($appName) . ' © ' . $year . '</div>';
+    echo '<div class="small text-muted text-md-center">' . Html::e($verLabel !== '' ? $verLabel : '-') . '</div>';
+    echo '<div class="text-md-end">';
+    echo '<div class="alert alert-warning py-2 px-3 mb-0 small"><span class="fw-semibold">' . Html::e($disclaimer) . '</span></div>';
     echo '</div>';
-    echo '</footer>';
+    echo '</div></footer>';
 
     echo '<script src="assets/js/app.js"></script>';
     echo '</body></html>';
@@ -76,12 +86,59 @@ if ($page === 'scan') {
     $result = $scan['result_json'] ? json_decode($scan['result_json'], true) : null;
     $status = $scan['status'];
     $progress = (int)$scan['progress'];
+    $token = $csrf->getToken();
+    $captchaQuestion = null;
+    if ($config['security']['captcha']['enabled']) {
+        $captchaQuestion = WSSC\captcha()->newChallenge();
+    }
 
     $body = '<div class="d-flex align-items-center justify-content-between mb-3">';
     $body .= '<h1 class="h4 mb-0">Rezultate: ' . Html::e($scan['domain']) . '</h1>';
     $body .= '<span class="badge bg-' . ($status === 'done' ? 'success' : ($status === 'error' ? 'danger' : 'secondary')) . '">'
         . Html::e(strtoupper($status)) . '</span>';
     $body .= '</div>';
+
+    $body .= '<div class="card mb-3"><div class="card-header">Scanare nouă</div><div class="card-body">';
+    $body .= '<form id="scanForm" method="post" autocomplete="off">';
+    $body .= '<input type="hidden" name="csrf_token" value="' . Html::e($token) . '">';
+    $body .= '<div class="row g-3">';
+    $body .= '<div class="col-md-6">';
+    $body .= '<label class="form-label">Domeniu</label>';
+    $body .= '<input class="form-control" name="domain" placeholder="ex: sub.example.com" value="' . Html::e((string)$scan['domain']) . '" required>';
+    $body .= '<div class="form-text">Scanează doar domenii pe care le deții sau ai permisiune explicită.</div>';
+    $body .= '</div>';
+    $body .= '<div class="col-md-4">';
+    $body .= '<label class="form-label">Tip scanare</label>';
+    $body .= '<select class="form-select" name="mode">';
+    $body .= '<option value="quick">Rapidă</option>';
+    $body .= '<option value="full">Completă</option>';
+    $body .= '</select>';
+    $body .= '</div>';
+    $body .= '<div class="col-md-2 d-flex align-items-end">';
+    $body .= '<button class="btn btn-primary w-100" type="submit">Pornește</button>';
+    $body .= '</div>';
+    $body .= '</div>';
+    if ($captchaQuestion) {
+        $body .= '<div class="row g-3 mt-0">';
+        $body .= '<div class="col-md-6">';
+        $body .= '<label class="form-label mt-3">CAPTCHA</label>';
+        $body .= '<div class="d-flex gap-2 align-items-center">';
+        $body .= '<div class="captcha-box">' . Html::e($captchaQuestion) . '</div>';
+        $body .= '<input class="form-control" name="captcha_answer" placeholder="Răspuns" required>';
+        $body .= '</div></div></div>';
+    }
+    $body .= '</form>';
+    $body .= '<div id="scanRunner" class="card mt-3 d-none"><div class="card-body">';
+    $body .= '<div class="d-flex align-items-center justify-content-between mb-2">';
+    $body .= '<div class="fw-semibold">Scanare în progres</div>';
+    $body .= '<div class="small text-muted" id="scanProgressText">0%</div>';
+    $body .= '</div>';
+    $body .= '<div class="progress" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">';
+    $body .= '<div class="progress-bar" id="scanProgressBar" style="width:0%"></div>';
+    $body .= '</div>';
+    $body .= '<div class="small text-muted mt-2" id="scanStatusText">Inițializare...</div>';
+    $body .= '</div></div>';
+    $body .= '</div></div>';
 
     $body .= '<div class="card mb-3"><div class="card-body">';
     $body .= '<div class="row g-3">';
@@ -269,6 +326,42 @@ if ($page === 'scan') {
             }
             if ($rec !== '') {
                 $body .= '<div class="mb-2"><div class="fw-semibold">Recomandare</div><div>' . nl2br(Html::e($rec)) . '</div></div>';
+            }
+            if (is_array($evidence)) {
+                $cve = is_string($evidence['cve'] ?? null) ? (string)$evidence['cve'] : '';
+                $cveLink = is_string($evidence['cve_link'] ?? null) ? (string)$evidence['cve_link'] : '';
+                $risk = is_string($evidence['risk'] ?? null) ? (string)$evidence['risk'] : '';
+                $affected = is_string($evidence['affected'] ?? null) ? (string)$evidence['affected'] : '';
+                $safe = is_string($evidence['recommended_safe'] ?? null) ? (string)$evidence['recommended_safe'] : '';
+
+                $isHttps = static function (string $url): bool {
+                    $p = parse_url($url);
+                    return is_array($p) && strtolower((string)($p['scheme'] ?? '')) === 'https';
+                };
+
+                if ($cve !== '' || $risk !== '' || $affected !== '' || $safe !== '') {
+                    $body .= '<div class="mt-3">';
+                    $body .= '<div class="fw-semibold">Detalii</div>';
+                    $body .= '<ul class="mb-0">';
+                    if ($cve !== '') {
+                        if ($cveLink !== '' && $isHttps($cveLink)) {
+                            $body .= '<li><span class="text-muted">CVE:</span> <a href="' . Html::e($cveLink) . '" target="_blank" rel="noopener">' . Html::e($cve) . '</a></li>';
+                        } else {
+                            $body .= '<li><span class="text-muted">CVE:</span> ' . Html::e($cve) . '</li>';
+                        }
+                    }
+                    if ($affected !== '') {
+                        $body .= '<li><span class="text-muted">Interval afectat:</span> ' . Html::e($affected) . '</li>';
+                    }
+                    if ($safe !== '') {
+                        $body .= '<li><span class="text-muted">Versiune recomandată:</span> ' . Html::e($safe) . '</li>';
+                    }
+                    if ($risk !== '') {
+                        $body .= '<li><span class="text-muted">Risc:</span> ' . Html::e($risk) . '</li>';
+                    }
+                    $body .= '</ul>';
+                    $body .= '</div>';
+                }
             }
             if ($evidence !== null) {
                 $body .= '<details><summary class="small text-muted">Evidență</summary>';
@@ -472,7 +565,7 @@ $body .= '<form id="scanForm" method="post" autocomplete="off">';
 $body .= '<input type="hidden" name="csrf_token" value="' . Html::e($token) . '">';
 $body .= '<div class="mb-3">';
 $body .= '<label class="form-label">Domeniu</label>';
-$body .= '<input class="form-control" name="domain" placeholder="example.com" value="' . Html::e($prefillDomain) . '" required>';
+$body .= '<input class="form-control" name="domain" placeholder="ex: sub.example.com" value="' . Html::e($prefillDomain) . '" required>';
 $body .= '<div class="form-text">Scanează doar domenii pe care le deții sau ai permisiune explicită.</div>';
 $body .= '</div>';
 
@@ -523,7 +616,7 @@ $body .= '</ul>';
 $body .= '</div></div>';
 
 $body .= '<div class="alert alert-warning mt-3 mb-0">';
-$body .= Html::e($config['ui']['disclaimer_text']);
+$body .= '<span class="fw-semibold">' . Html::e($config['ui']['disclaimer_text']) . '</span>';
 $body .= '</div>';
 $body .= '</div>';
 $body .= '</div>';

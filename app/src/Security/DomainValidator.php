@@ -56,7 +56,10 @@ final class DomainValidator
         if (filter_var($host, FILTER_VALIDATE_IP)) {
             return false;
         }
-        return (bool)preg_match('/^(?=.{1,253}$)(?!-)(?:[a-z0-9-]{1,63}(?<!-)\.)+[a-z]{2,63}$/', $host);
+        if (filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
+            return false;
+        }
+        return true;
     }
 
     private function resolvePublicIp(string $host): ?string
@@ -93,4 +96,3 @@ final class DomainValidator
         return (bool)filter_var($ip, FILTER_VALIDATE_IP, $flags);
     }
 }
-

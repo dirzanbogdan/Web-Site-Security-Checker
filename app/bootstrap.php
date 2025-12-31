@@ -116,3 +116,53 @@ function captcha(): Captcha
     $c = new Captcha($cfg['security']['captcha']);
     return $c;
 }
+
+function app_commit_short(): ?string
+{
+    $gitDir = APP_ROOT . '/.git';
+    if (!is_dir($gitDir)) {
+        return null;
+    }
+
+    $headPath = $gitDir . '/HEAD';
+    $headRaw = @file_get_contents($headPath);
+    if (!is_string($headRaw) || trim($headRaw) === '') {
+        return null;
+    }
+    $head = trim($headRaw);
+
+    $hash = '';
+    if (str_starts_with($head, 'ref:')) {
+        $ref = trim(substr($head, 4));
+        $refPath = $gitDir . '/' . str_replace('/', '/', $ref);
+        $refRaw = @file_get_contents($refPath);
+        if (is_string($refRaw) && trim($refRaw) !== '') {
+            $hash = trim($refRaw);
+        } else {
+            $packed = @file_get_contents($gitDir . '/packed-refs');
+            if (is_string($packed) && $packed !== '') {
+                foreach (preg_split('/\R/', $packed) ?: [] as $line) {
+                    $line = trim((string)$line);
+                    if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, '^')) {
+                        continue;
+                    }
+                    $parts = preg_split('/\s+/', $line);
+                    if (!is_array($parts) || count($parts) < 2) {
+                        continue;
+                    }
+                    if ((string)$parts[1] === $ref) {
+                        $hash = (string)$parts[0];
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        $hash = $head;
+    }
+
+    if (!preg_match('/^[0-9a-f]{7,40}$/i', $hash)) {
+        return null;
+    }
+    return substr(strtolower($hash), 0, 7);
+}

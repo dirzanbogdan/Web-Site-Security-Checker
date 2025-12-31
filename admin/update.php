@@ -309,7 +309,14 @@ $last = wssc_last_backup($serverBackupDir);
   <main class="container my-4">
     <div class="d-flex align-items-center justify-content-between mb-3">
       <h1 class="h4 mb-0">Update & Backup</h1>
-      <span class="badge bg-secondary"><?= Html::e($info['exec']) ?></span>
+      <div class="text-end">
+        <span class="small text-muted me-2">Exec:</span>
+        <?php if ($info['exec'] === 'ENABLED'): ?>
+          <span class="badge bg-success">status: Enabled</span>
+        <?php else: ?>
+          <span class="badge bg-danger">status: Disabled</span>
+        <?php endif; ?>
+      </div>
     </div>
 
     <?php if ($errors): ?>
