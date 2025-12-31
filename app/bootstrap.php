@@ -185,16 +185,29 @@ function app_version_label(): string
     $maj = '1';
     $min = '0';
     $date = gmdate('Ymd');
-    $parts = explode('.', $verRaw);
-    if (count($parts) >= 3) {
-        $maj = preg_replace('/[^0-9]/', '', (string)$parts[0]) ?: $maj;
-        $min = preg_replace('/[^0-9]/', '', (string)$parts[1]) ?: $min;
-        $date = preg_replace('/[^0-9]/', '', (string)$parts[2]) ?: $date;
-    }
-    if (exec_available()) {
-        $ds = shell_exec('git log -1 --date=format:%Y%m%d --format=%cd 2>&1');
-        if (is_string($ds) && trim($ds) !== '') {
-            $date = trim($ds);
+    $changelog = APP_ROOT . '/CHANGELOG.md';
+    if (is_file($changelog)) {
+        $raw = @file_get_contents($changelog);
+        if (is_string($raw) && $raw !== '') {
+            foreach (preg_split('/\R/', $raw) ?: [] as $line) {
+                $line = trim((string)$line);
+                if (str_starts_with($line, '## ')) {
+                    $ver = trim(substr($line, 3));
+                    if (preg_match('/^(\d+)\.(\d+)\.(\d{8})/', $ver, $m)) {
+                        $maj = $m[1];
+                        $min = $m[2];
+                        $date = $m[3];
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        $parts = explode('.', $verRaw);
+        if (count($parts) >= 3) {
+            $maj = preg_replace('/[^0-9]/', '', (string)$parts[0]) ?: $maj;
+            $min = preg_replace('/[^0-9]/', '', (string)$parts[1]) ?: $min;
+            $date = preg_replace('/[^0-9]/', '', (string)$parts[2]) ?: $date;
         }
     }
     $label = $maj . '.' . $min . '.' . $date;

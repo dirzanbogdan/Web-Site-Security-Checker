@@ -37,11 +37,11 @@ function wssc_layout(string $title, string $bodyHtml, array $config): void
     echo '<link rel="stylesheet" href="assets/css/app.css">';
     echo '</head><body>';
 
-    echo WSSC\navbar_html($config);
+    echo \WSSC\navbar_html($config);
 
     echo '<main class="container my-4">' . $bodyHtml . '</main>';
 
-    echo WSSC\footer_html($config);
+    echo \WSSC\footer_html($config);
 
     echo '<script src="assets/js/app.js"></script>';
     echo '</body></html>';
